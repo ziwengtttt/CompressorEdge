@@ -36,17 +36,15 @@ fun formatDuration(ms: Long): String {
  * The old code took that value verbatim, which is why an output was named e.g. "5108.mp4".
  */
 fun resolveDisplayName(context: Context, uri: Uri): String? {
-    // 1. Standard OpenableColumns lookup (MediaStore and SAF documents both expose this).
-    runCatching {
-        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (index >= 0) {
-                    val name = cursor.getString(index)
-                    if (isUsableDisplayName(name)) return name
-                }
-            }
-        }
+    // 1. Ask explicitly for DISPLAY_NAME. With a null projection some providers (notably the
+    //    system Photo Picker) only return internal id columns, which is how an output ended up
+    //    being named "5108.mp4" and later "Compressed_Compressed.mp4".
+    queryDisplayName(context, uri, arrayOf(OpenableColumns.DISPLAY_NAME))?.let { name ->
+        if (isUsableDisplayName(name)) return name
+    }
+    // 1b. Fall back to an unrestricted cursor in case the provider rejects that projection.
+    queryDisplayName(context, uri, null)?.let { name ->
+        if (isUsableDisplayName(name)) return name
     }
 
     val lastSegment = uri.lastPathSegment
@@ -85,4 +83,15 @@ fun isUsableDisplayName(name: String?): Boolean {
     if (name.isNullOrBlank()) return false
     val stem = name.substringBeforeLast(".")
     return stem.isNotBlank() && !stem.matches(Regex("\\d+"))
+}
+
+/** Runs a single DISPLAY_NAME lookup, returning null on any provider failure. */
+private fun queryDisplayName(context: Context, uri: Uri, projection: Array<String>?): String? {
+    return runCatching {
+        context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (index >= 0) cursor.getString(index) else null
+        }
+    }.getOrNull()
 }

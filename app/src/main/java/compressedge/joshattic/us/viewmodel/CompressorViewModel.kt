@@ -819,7 +819,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         }
 
         val originalNameStr by lazy {
-            state.originalName?.substringBeforeLast(".")?.takeIf { it.isNotBlank() } ?: "Compressed"
+            state.originalName?.substringBeforeLast(".")?.takeIf { it.isNotBlank() } ?: ""
         }
 
         val parts = mutableListOf<String>()
