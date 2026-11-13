@@ -147,8 +147,20 @@ fun CompressorApp(viewModel: CompressorViewModel) {
         }
     }
     
-    val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
+    // System file picker (SAF): reliable display names, works for hidden folders, no media
+    // permission needed. The Photo Picker deliberately returns numeric ids on some devices,
+    // which is why the output used to be named "5108.mp4" / "Compressed.mp4".
+    val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) {
+            // Keep read access alive for background compression and long batches.
+            uris.forEach { uri ->
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        uri,
+                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+            }
             viewModel.updateSelectedUris(context, uris)
         }
     }
@@ -409,7 +421,7 @@ fun CompressorApp(viewModel: CompressorViewModel) {
                                     0 -> EmptyScreen(
                                         totalSaved = state.formattedTotalSaved,
                                         showStorageSaved = state.showStorageSaved,
-                                        onPick = { pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }
+                                        onPick = { pickMedia.launch(arrayOf("video/*")) }
                                     )
                                     2 -> {
                                         if (state.error != null) {
