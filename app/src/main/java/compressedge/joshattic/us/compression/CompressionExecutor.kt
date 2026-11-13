@@ -14,7 +14,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.FrameDropEffect
 import androidx.media3.effect.Presentation
 import androidx.media3.transformer.AudioEncoderSettings
-import androidx.media3.transformer.ClippingConfiguration
 import androidx.media3.transformer.Codec
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.DefaultAssetLoaderFactory
@@ -197,24 +196,23 @@ object CompressionExecutor {
             effectsList.add(FrameDropEffect.createSimpleFrameDropEffect(params.originalFps, params.outputFps.toFloat()))
         }
 
-        val mediaItem = MediaItem.fromUri(params.inputUri)
+        val clippingConfiguration = MediaItem.ClippingConfiguration.Builder()
+            .setStartPositionMs(params.trimStartMs.coerceAtLeast(0L))
+            .apply { if (params.trimEndMs > 0L) setEndPositionMs(params.trimEndMs) }
+            .build()
+        val mediaItem = MediaItem.Builder()
+            .setUri(params.inputUri)
+            .setClippingConfiguration(clippingConfiguration)
+            .build()
         val audioProcessors: List<AudioProcessor> = if (!params.removeAudio) {
             val volumeProcessor = VolumeAudioProcessor().apply { setVolume(params.audioVolume) }
             listOf(volumeProcessor, SonicAudioProcessor())
         } else {
             emptyList()
         }
-        val clippingBuilder = ClippingConfiguration.Builder()
-            .setStartPositionMs(params.trimStartMs.coerceAtLeast(0L))
-        if (params.trimEndMs > 0L) {
-            clippingBuilder.setEndPositionMs(params.trimEndMs)
-        }
-        val clippingConfiguration = clippingBuilder.build()
-
         val editedMediaItem = EditedMediaItem.Builder(mediaItem)
             .setEffects(Effects(audioProcessors, effectsList))
             .setRemoveAudio(params.removeAudio)
-            .setClippingConfiguration(clippingConfiguration)
             .build()
 
         var hdrMode = Composition.HDR_MODE_KEEP_HDR
