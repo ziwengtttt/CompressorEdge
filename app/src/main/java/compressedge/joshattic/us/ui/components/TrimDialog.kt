@@ -14,6 +14,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -23,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -46,7 +48,7 @@ import compressedge.joshattic.us.utils.formatDuration
 fun TrimDialog(
     item: QueueItem,
     onDismiss: () -> Unit,
-    onApply: (Long, Long) -> Unit
+    onApply: (Long, Long, Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val duration = item.durationMs.coerceAtLeast(1L)
@@ -58,6 +60,8 @@ fun TrimDialog(
         val minEnd = (startMs + minGap).coerceAtMost(duration)
         mutableStateOf(initialEnd.coerceIn(minEnd, duration))
     }
+
+    var lossless by remember { mutableStateOf(item.losslessTrim) }
 
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
@@ -159,10 +163,34 @@ fun TrimDialog(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "仅裁剪（不重编码）",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (lossless) {
+                                "流复制：无损、秒级完成、几乎不发热；切点对齐关键帧"
+                            } else {
+                                "重新编码：可减小体积，但更慢、会发热"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(checked = lossless, onCheckedChange = { lossless = it })
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
                     TextButton(onClick = onDismiss) { Text("取消") }
-                    Button(onClick = { onApply(startMs, endMs) }) { Text("应用裁剪") }
+                    Button(onClick = { onApply(startMs, endMs, lossless) }) { Text("应用裁剪") }
                 }
             }
         }

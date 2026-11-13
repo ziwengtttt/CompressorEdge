@@ -16,6 +16,8 @@ data class QueueItem(
     // Trim range in milliseconds. trimEndMs == 0 means "until the end of the video".
     val trimStartMs: Long = 0L,
     val trimEndMs: Long = 0L,
+    // When true the clip is stream-copied instead of re-encoded (no quality loss, no heat).
+    val losslessTrim: Boolean = false,
     
     // Status
     val isCompressing: Boolean = false,

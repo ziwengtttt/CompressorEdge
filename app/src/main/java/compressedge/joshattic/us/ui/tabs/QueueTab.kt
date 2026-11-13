@@ -105,8 +105,9 @@ private fun QueueItemCard(
         TrimDialog(
             item = item,
             onDismiss = { showTrimDialog = false },
-            onApply = { startMs, endMs ->
+            onApply = { startMs, endMs, lossless ->
                 viewModel.updateQueueItemTrim(item.uri, startMs, endMs)
+                viewModel.updateQueueItemLossless(item.uri, lossless)
                 showTrimDialog = false
             }
         )
@@ -227,13 +228,13 @@ private fun QueueItemCard(
                                 }
                             }
                             Text(
-                                text = if (item.hasTrim) {
+                                text = (if (item.hasTrim) {
                                     "${formatDuration(item.trimStartMs)} → " +
                                         "${formatDuration(if (item.trimEndMs > 0L) item.trimEndMs else item.durationMs)}" +
                                         " · 保留 ${formatDuration(item.trimmedDurationMs)}"
                                 } else {
                                     "完整视频 · ${formatDuration(item.durationMs)}"
-                                },
+                                }) + if (item.losslessTrim) " · 仅裁剪（无损）" else "",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

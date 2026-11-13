@@ -514,6 +514,15 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    /** Marks one queued video to be stream-copied (no re-encode) instead of compressed. */
+    fun updateQueueItemLossless(uri: Uri, enabled: Boolean) {
+        _uiState.update { state ->
+            state.copy(
+                queue = state.queue.map { if (it.uri == uri) it.copy(losslessTrim = enabled) else it }
+            )
+        }
+    }
+
     fun removeQueueItem(uri: Uri) {
         _uiState.update { state ->
             val newQueue = state.queue.filter { it.uri != uri }
@@ -1607,10 +1616,20 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                 )
 
                 try {
-                    val finalSize = CompressionExecutor.executeSuspend(context, params) { holder, _ ->
-                        val overallProgress = (index.toFloat() + (holder.progress / 100f)) / itemsToProcess.size.toFloat()
-                        val currentSize = if (outputFile.exists()) outputFile.length() else 0L
-                        _uiState.update { it.copy(progress = overallProgress, currentOutputSize = currentSize) }
+                    val finalSize = if (item.losslessTrim) {
+                        // Stream copy: no decoder, no encoder, so it finishes in seconds.
+                        _uiState.update {
+                            it.copy(progress = index.toFloat() / itemsToProcess.size.toFloat())
+                        }
+                        compressedge.joshattic.us.compression.LosslessTrimmer.trim(
+                            context, item.uri, outputPath, item.trimStartMs, item.trimEndMs
+                        )
+                    } else {
+                        CompressionExecutor.executeSuspend(context, params) { holder, _ ->
+                            val overallProgress = (index.toFloat() + (holder.progress / 100f)) / itemsToProcess.size.toFloat()
+                            val currentSize = if (outputFile.exists()) outputFile.length() else 0L
+                            _uiState.update { it.copy(progress = overallProgress, currentOutputSize = currentSize) }
+                        }
                     }
                     
                     val savedBytes = item.originalSize - finalSize
@@ -1675,6 +1694,11 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         BackgroundCompressionManager.reset()
 
         val currentState = _uiState.value
+        if (currentState.queue.any { it.losslessTrim }) {
+            // Stream-copy trimming only runs in the foreground path.
+            startCompression(context)
+            return@launch
+        }
         val itemsToProcess = if (currentState.isBatchMode) currentState.queue else {
             currentState.selectedUri?.let { listOf(currentState.queue.firstOrNull { q -> q.uri == it } ?: compressedge.joshattic.us.model.QueueItem(
                 uri = it,
