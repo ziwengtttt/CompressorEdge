@@ -13,6 +13,9 @@ data class QueueItem(
     val originalVideoMime: String? = null,
     val durationMs: Long = 0L,
     val originalName: String? = null,
+    // Trim range in milliseconds. trimEndMs == 0 means "until the end of the video".
+    val trimStartMs: Long = 0L,
+    val trimEndMs: Long = 0L,
     
     // Status
     val isCompressing: Boolean = false,
@@ -32,4 +35,16 @@ data class QueueItem(
     val audioVolumeOverride: Float? = null
 ) {
     val isVertical: Boolean get() = originalHeight > originalWidth
+
+    /** Duration actually exported after trimming. Falls back to the source duration. */
+    val trimmedDurationMs: Long
+        get() {
+            if (durationMs <= 0L) return 0L
+            val start = trimStartMs.coerceIn(0L, durationMs)
+            val end = if (trimEndMs > 0L) trimEndMs.coerceIn(0L, durationMs) else durationMs
+            return (end - start).coerceAtLeast(0L)
+        }
+
+    val hasTrim: Boolean
+        get() = trimStartMs > 0L || (trimEndMs in 1 until durationMs)
 }

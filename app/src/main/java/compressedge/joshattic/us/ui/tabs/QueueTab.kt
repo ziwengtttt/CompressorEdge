@@ -26,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
@@ -36,6 +37,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -57,7 +59,9 @@ import compressedge.joshattic.us.R
 import compressedge.joshattic.us.model.CompressorUiState
 import compressedge.joshattic.us.model.QueueItem
 import compressedge.joshattic.us.ui.components.SelectionChip
+import compressedge.joshattic.us.ui.components.TrimDialog
 import compressedge.joshattic.us.utils.expressiveScale
+import compressedge.joshattic.us.utils.formatDuration
 import compressedge.joshattic.us.utils.formatFileSize
 import compressedge.joshattic.us.viewmodel.CompressorViewModel
 
@@ -86,6 +90,7 @@ private fun QueueItemCard(
     viewModel: CompressorViewModel
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var showTrimDialog by remember { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
     val interactionSource = remember { MutableInteractionSource() }
 
@@ -95,6 +100,17 @@ private fun QueueItemCard(
             item.audioBitrateOverride != null ||
             item.removeAudioOverride != null ||
             item.audioVolumeOverride != null
+
+    if (showTrimDialog) {
+        TrimDialog(
+            item = item,
+            onDismiss = { showTrimDialog = false },
+            onApply = { startMs, endMs ->
+                viewModel.updateQueueItemTrim(item.uri, startMs, endMs)
+                showTrimDialog = false
+            }
+        )
+    }
 
     Card(
         modifier = Modifier
@@ -186,6 +202,53 @@ private fun QueueItemCard(
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
+                        // Trim range for this clip
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "裁剪区间",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                if (item.hasTrim) {
+                                    TextButton(
+                                        onClick = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            viewModel.resetQueueItemTrim(item.uri)
+                                        }
+                                    ) {
+                                        Text("重置裁剪", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                            }
+                            Text(
+                                text = if (item.hasTrim) {
+                                    "${formatDuration(item.trimStartMs)} → " +
+                                        "${formatDuration(if (item.trimEndMs > 0L) item.trimEndMs else item.durationMs)}" +
+                                        " · 保留 ${formatDuration(item.trimmedDurationMs)}"
+                                } else {
+                                    "完整视频 · ${formatDuration(item.durationMs)}"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OutlinedButton(onClick = { showTrimDialog = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentCut,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(if (item.hasTrim) "修改裁剪" else "裁剪视频")
+                            }
+                        }
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,

@@ -14,6 +14,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.FrameDropEffect
 import androidx.media3.effect.Presentation
 import androidx.media3.transformer.AudioEncoderSettings
+import androidx.media3.transformer.ClippingConfiguration
 import androidx.media3.transformer.Codec
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.DefaultAssetLoaderFactory
@@ -59,6 +60,9 @@ object CompressionExecutor {
         val audioCodec: String,
         val removeAudio: Boolean,
         val audioVolume: Float,
+        // Trim range in milliseconds. trimEndMs == 0 means "until the end" (see C.TIME_END_OF_SOURCE).
+        val trimStartMs: Long = 0L,
+        val trimEndMs: Long = 0L,
         val onHdrToneMap: (() -> Unit)? = null
     )
 
@@ -200,9 +204,17 @@ object CompressionExecutor {
         } else {
             emptyList()
         }
+        val clippingBuilder = ClippingConfiguration.Builder()
+            .setStartPositionMs(params.trimStartMs.coerceAtLeast(0L))
+        if (params.trimEndMs > 0L) {
+            clippingBuilder.setEndPositionMs(params.trimEndMs)
+        }
+        val clippingConfiguration = clippingBuilder.build()
+
         val editedMediaItem = EditedMediaItem.Builder(mediaItem)
             .setEffects(Effects(audioProcessors, effectsList))
             .setRemoveAudio(params.removeAudio)
+            .setClippingConfiguration(clippingConfiguration)
             .build()
 
         var hdrMode = Composition.HDR_MODE_KEEP_HDR
