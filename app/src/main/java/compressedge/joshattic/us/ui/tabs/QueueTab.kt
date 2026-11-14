@@ -44,7 +44,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -72,12 +74,132 @@ fun QueueTab(state: CompressorUiState, viewModel: CompressorViewModel) {
         contentPadding = PaddingValues(top = 16.dp, bottom = 120.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        item { UnifiedCompressionCard(state, viewModel) }
         items(
             items = state.queue,
             key = { it.uri.toString() }
         ) { item ->
             Box(modifier = Modifier.animateItem()) {
                 QueueItemCard(item = item, state = state, viewModel = viewModel)
+            }
+        }
+    }
+}
+
+@Composable
+private fun UnifiedCompressionCard(state: CompressorUiState, viewModel: CompressorViewModel) {
+    val haptics = LocalHapticFeedback.current
+    var pct by remember { mutableFloatStateOf(state.globalTargetSizePercentage) }
+    LaunchedEffect(state.globalTargetSizePercentage) {
+        pct = state.globalTargetSizePercentage
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "批量统一设置",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = "这里改的是整批视频。个别视频要不同参数，展开它点「单独调整」。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Text("分辨率", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SelectionChip(
+                    selected = state.targetResolutionHeight == 0,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.setResolution(0)
+                    },
+                    label = "原视频"
+                )
+                listOf(1080, 720, 540, 480, 360).forEach { height ->
+                    SelectionChip(
+                        selected = state.targetResolutionHeight == height,
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.setResolution(height)
+                        },
+                        label = "${height}p"
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "目标体积",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "${pct.toInt()}%",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            Slider(
+                value = pct,
+                onValueChange = {
+                    pct = it
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                },
+                onValueChangeFinished = { viewModel.setGlobalTargetSizePercentage(pct) },
+                valueRange = 10f..100f,
+                steps = 17
+            )
+
+            Text("帧率", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SelectionChip(
+                    selected = state.targetFps == 0,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.setFps(0)
+                    },
+                    label = "原视频"
+                )
+                listOf(60, 30).forEach { fps ->
+                    SelectionChip(
+                        selected = state.targetFps == fps,
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.setFps(fps)
+                        },
+                        label = "$fps FPS"
+                    )
+                }
+            }
+
+            TextButton(
+                onClick = { viewModel.clearAllOverrides() },
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                Text("全部恢复跟随统一设置", style = MaterialTheme.typography.labelSmall)
             }
         }
     }
@@ -91,6 +213,7 @@ private fun QueueItemCard(
 ) {
     var expanded by remember { mutableStateOf(false) }
     var showTrimDialog by remember { mutableStateOf(false) }
+    var showOverrides by remember { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
     val interactionSource = remember { MutableInteractionSource() }
 
@@ -250,6 +373,24 @@ private fun QueueItemCard(
                             }
                         }
 
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (hasAnyOverrides) "已单独调整" else "压缩设置：跟随统一设置",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (hasAnyOverrides) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            TextButton(onClick = { showOverrides = !showOverrides }) {
+                                Text(if (showOverrides) "收起" else "单独调整")
+                            }
+                        }
+
+                        AnimatedVisibility(visible = showOverrides) {
+                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -576,6 +717,8 @@ private fun QueueItemCard(
                                         Text("Reset Volume", style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
+                            }
+                        }
                             }
                         }
                     }

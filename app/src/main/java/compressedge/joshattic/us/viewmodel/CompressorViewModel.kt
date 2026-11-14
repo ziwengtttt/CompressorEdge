@@ -523,6 +523,24 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    /** Drops every per-video override so the whole queue follows the unified settings again. */
+    fun clearAllOverrides() {
+        _uiState.update { state ->
+            state.copy(
+                queue = state.queue.map {
+                    it.copy(
+                        targetSizePercentageOverride = null,
+                        targetResolutionHeightOverride = null,
+                        targetFpsOverride = null,
+                        audioBitrateOverride = null,
+                        removeAudioOverride = null,
+                        audioVolumeOverride = null
+                    )
+                }
+            )
+        }
+    }
+
     fun removeQueueItem(uri: Uri) {
         _uiState.update { state ->
             val newQueue = state.queue.filter { it.uri != uri }
