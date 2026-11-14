@@ -19,9 +19,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
@@ -36,6 +38,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import compressedge.joshattic.us.model.QueueItem
 import compressedge.joshattic.us.utils.formatDuration
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 /**
  * Trim editor for one queued video.
@@ -62,6 +66,7 @@ fun TrimDialog(
     }
 
     var lossless by remember { mutableStateOf(item.losslessTrim) }
+    var positionMs by remember { mutableStateOf(startMs) }
 
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
@@ -71,6 +76,24 @@ fun TrimDialog(
     }
     DisposableEffect(Unit) {
         onDispose { exoPlayer.release() }
+    }
+
+    val curStart by rememberUpdatedState(startMs)
+    val curEnd by rememberUpdatedState(endMs)
+
+    // Keep the play head inside the kept range and stop it at the end.
+    LaunchedEffect(exoPlayer) {
+        while (isActive) {
+            val pos = exoPlayer.currentPosition
+            if (exoPlayer.isPlaying && pos >= curEnd) {
+                exoPlayer.pause()
+                exoPlayer.seekTo(curStart)
+                positionMs = curStart
+            } else {
+                positionMs = pos.coerceIn(curStart, curEnd)
+            }
+            delay(200)
+        }
     }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -121,6 +144,7 @@ fun TrimDialog(
                         value = startMs.toFloat(),
                         onValueChange = { value ->
                             startMs = value.toLong().coerceIn(0L, (endMs - minGap).coerceAtLeast(0L))
+                            if (positionMs < startMs) positionMs = startMs
                             exoPlayer.seekTo(startMs)
                         },
                         onValueChangeFinished = { exoPlayer.play() },
@@ -144,6 +168,7 @@ fun TrimDialog(
                         value = endMs.toFloat(),
                         onValueChange = { value ->
                             endMs = value.toLong().coerceIn((startMs + minGap).coerceAtMost(duration), duration)
+                            if (positionMs > endMs) positionMs = endMs
                         },
                         onValueChangeFinished = {
                             // Preview the retained range from its start, as requested.
@@ -151,6 +176,30 @@ fun TrimDialog(
                             exoPlayer.play()
                         },
                         valueRange = 0f..duration.toFloat()
+                    )
+                }
+
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("播放位置", style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            "${formatDuration(positionMs)} / ${formatDuration(endMs)}",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    val playEnd = endMs.coerceAtLeast(startMs + 1L)
+                    Slider(
+                        value = positionMs.coerceIn(startMs, playEnd).toFloat(),
+                        onValueChange = { value ->
+                            positionMs = value.toLong().coerceIn(startMs, playEnd)
+                            exoPlayer.seekTo(positionMs)
+                        },
+                        onValueChangeFinished = { exoPlayer.play() },
+                        valueRange = startMs.toFloat()..playEnd.toFloat()
                     )
                 }
 
