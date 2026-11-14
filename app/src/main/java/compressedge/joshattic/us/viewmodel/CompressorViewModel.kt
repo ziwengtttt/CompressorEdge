@@ -381,14 +381,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                         fps = 30f
                     }
 
-                    val cursor = context.contentResolver.query(uri, null, null, null, null)
-                    if (cursor != null && cursor.moveToFirst()) {
-                        val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                        if (nameIndex != -1) {
-                            originalName = cursor.getString(nameIndex)
-                        }
-                        cursor.close()
-                    }
+                    originalName = compressedge.joshattic.us.utils.resolveDisplayName(context, uri)
 
                     retriever.release()
                 } catch (e: Exception) {
@@ -418,7 +411,9 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                         originalFps = fps,
                         originalVideoMime = videoMime,
                         durationMs = duration,
-                        originalName = originalName
+                        originalName = originalName,
+                        trimStartMs = 0L,
+                        trimEndMs = duration
                     )
                 )
             }
@@ -492,6 +487,57 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         _uiState.update { state ->
             val newQueue = state.queue.map { if (it.uri == uri) updater(it) else it }
             state.copy(queue = newQueue)
+        }
+    }
+
+    /** Updates the trim range (milliseconds) of a single queued video. */
+    fun updateQueueItemTrim(uri: Uri, startMs: Long, endMs: Long) {
+        _uiState.update { state ->
+            val newQueue = state.queue.map { item ->
+                if (item.uri != uri) return@map item
+                val duration = item.durationMs.coerceAtLeast(0L)
+                val safeStart = startMs.coerceIn(0L, duration)
+                val safeEnd = if (duration > 0L) endMs.coerceIn(safeStart, duration) else 0L
+                item.copy(trimStartMs = safeStart, trimEndMs = safeEnd)
+            }
+            state.copy(queue = newQueue)
+        }
+    }
+
+    /** Resets the trim range of a queued video back to the full clip. */
+    fun resetQueueItemTrim(uri: Uri) {
+        _uiState.update { state ->
+            val newQueue = state.queue.map { item ->
+                if (item.uri == uri) item.copy(trimStartMs = 0L, trimEndMs = item.durationMs) else item
+            }
+            state.copy(queue = newQueue)
+        }
+    }
+
+    /** Marks one queued video to be stream-copied (no re-encode) instead of compressed. */
+    fun updateQueueItemLossless(uri: Uri, enabled: Boolean) {
+        _uiState.update { state ->
+            state.copy(
+                queue = state.queue.map { if (it.uri == uri) it.copy(losslessTrim = enabled) else it }
+            )
+        }
+    }
+
+    /** Drops every per-video override so the whole queue follows the unified settings again. */
+    fun clearAllOverrides() {
+        _uiState.update { state ->
+            state.copy(
+                queue = state.queue.map {
+                    it.copy(
+                        targetSizePercentageOverride = null,
+                        targetResolutionHeightOverride = null,
+                        targetFpsOverride = null,
+                        audioBitrateOverride = null,
+                        removeAudioOverride = null,
+                        audioVolumeOverride = null
+                    )
+                }
+            )
         }
     }
 
@@ -800,7 +846,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         }
 
         val originalNameStr by lazy {
-            state.originalName?.substringBeforeLast(".")?.takeIf { it.isNotBlank() } ?: "Compressed"
+            state.originalName?.substringBeforeLast(".")?.takeIf { it.isNotBlank() } ?: ""
         }
 
         val parts = mutableListOf<String>()
@@ -836,6 +882,34 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
 
         val finalStem = if (sanitized.isBlank()) "Compressed_${System.currentTimeMillis()}" else sanitized
         return "$finalStem.mp4"
+    }
+
+    /**
+     * Builds the on-disk output name for one queued item. The previous implementation hard-coded
+     * "&lt;originalName&gt;_Compressed.mp4" and ignored the user's filename segments entirely, so the
+     * naming options in Settings only ever changed the preview text.
+     */
+    private fun buildOutputFileName(
+        state: CompressorUiState,
+        item: compressedge.joshattic.us.model.QueueItem,
+        fallbackIndex: Int
+    ): String {
+        val nameState = state.copy(
+            originalName = item.originalName ?: state.originalName,
+            originalWidth = if (item.originalWidth > 0) item.originalWidth else state.originalWidth,
+            originalHeight = if (item.originalHeight > 0) item.originalHeight else state.originalHeight,
+            originalFps = if (item.originalFps > 0f) item.originalFps else state.originalFps,
+            targetResolutionHeight = item.targetResolutionHeightOverride ?: state.targetResolutionHeight,
+            targetFps = item.targetFpsOverride ?: state.targetFps
+        )
+        val generated = compressedOutputFileName(nameState)
+        return if (generated.isBlank() || generated == ".mp4") {
+            val stem = item.originalName?.substringBeforeLast(".")
+                ?: "Compressed_${System.currentTimeMillis()}_$fallbackIndex"
+            "${stem}_Compressed.mp4"
+        } else {
+            generated
+        }
     }
 
     private fun saveDefaultVideoConfig(config: DefaultVideoConfig) {
@@ -1463,11 +1537,12 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                 warningsAcc.addAll(plan.warnings)
                 _uiState.update { it.copy(warnings = warningsAcc.distinct()) }
 
-                val baseName = item.originalName?.substringBeforeLast(".") ?: "Compressed_${System.currentTimeMillis()}_$index"
-                var outputFile = File(outputDir, "${baseName}_Compressed.mp4")
+                val desiredName = buildOutputFileName(currentState, item, index)
+                val desiredStem = desiredName.substringBeforeLast(".")
+                var outputFile = File(outputDir, desiredName)
                 var counter = 1
                 while (outputFile.exists()) {
-                    outputFile = File(outputDir, "${baseName}_Compressed ($counter).mp4")
+                    outputFile = File(outputDir, "$desiredStem ($counter).mp4")
                     counter++
                 }
                 val outputPath = outputFile.absolutePath
@@ -1484,9 +1559,11 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                 val itemOutputFps = plan.outputFps
                 
                 // Recompute targetBitrate
-                val seconds = item.durationMs / 1000.0
+                val effectiveDurationMs = if (item.trimmedDurationMs > 0L) item.trimmedDurationMs else item.durationMs
+                val seconds = effectiveDurationMs / 1000.0
                 val targetSizePct = item.targetSizePercentageOverride ?: currentState.globalTargetSizePercentage
-                val itemOriginalMb = item.originalSize / (1024.0 * 1024.0)
+                val trimRatio = if (item.durationMs > 0L) item.trimmedDurationMs.toDouble() / item.durationMs else 1.0
+                val itemOriginalMb = item.originalSize / (1024.0 * 1024.0) * trimRatio
                 val targetMbForCalculation = if (currentState.isBatchMode) {
                     (itemOriginalMb * (targetSizePct / 100.0)).coerceAtLeast(0.1)
                 } else {
@@ -1545,6 +1622,8 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                     audioCodec = currentState.audioCodec,
                     removeAudio = item.removeAudioOverride ?: currentState.removeAudio,
                     audioVolume = item.audioVolumeOverride ?: currentState.audioVolume,
+                    trimStartMs = item.trimStartMs,
+                    trimEndMs = item.trimEndMs,
                     onHdrToneMap = {
                         val warningMsg = getApplication<android.app.Application>().getString(R.string.warning_hdr_tone_mapped)
                         if (!warningsAcc.contains(warningMsg)) {
@@ -1555,10 +1634,20 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                 )
 
                 try {
-                    val finalSize = CompressionExecutor.executeSuspend(context, params) { holder, _ ->
-                        val overallProgress = (index.toFloat() + (holder.progress / 100f)) / itemsToProcess.size.toFloat()
-                        val currentSize = if (outputFile.exists()) outputFile.length() else 0L
-                        _uiState.update { it.copy(progress = overallProgress, currentOutputSize = currentSize) }
+                    val finalSize = if (item.losslessTrim) {
+                        // Stream copy: no decoder, no encoder, so it finishes in seconds.
+                        _uiState.update {
+                            it.copy(progress = index.toFloat() / itemsToProcess.size.toFloat())
+                        }
+                        compressedge.joshattic.us.compression.LosslessTrimmer.trim(
+                            context, item.uri, outputPath, item.trimStartMs, item.trimEndMs
+                        )
+                    } else {
+                        CompressionExecutor.executeSuspend(context, params) { holder, _ ->
+                            val overallProgress = (index.toFloat() + (holder.progress / 100f)) / itemsToProcess.size.toFloat()
+                            val currentSize = if (outputFile.exists()) outputFile.length() else 0L
+                            _uiState.update { it.copy(progress = overallProgress, currentOutputSize = currentSize) }
+                        }
                     }
                     
                     val savedBytes = item.originalSize - finalSize
@@ -1623,6 +1712,11 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         BackgroundCompressionManager.reset()
 
         val currentState = _uiState.value
+        if (currentState.queue.any { it.losslessTrim }) {
+            // Stream-copy trimming only runs in the foreground path.
+            startCompression(context)
+            return@launch
+        }
         val itemsToProcess = if (currentState.isBatchMode) currentState.queue else {
             currentState.selectedUri?.let { listOf(currentState.queue.firstOrNull { q -> q.uri == it } ?: compressedge.joshattic.us.model.QueueItem(
                 uri = it,
@@ -1659,11 +1753,12 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
 
             warningsAcc.addAll(plan.warnings)
 
-            val baseName = item.originalName?.substringBeforeLast(".") ?: "Compressed_${System.currentTimeMillis()}_$index"
-            var outputFile = File(outputDir, "${baseName}_Compressed.mp4")
+            val desiredName = buildOutputFileName(currentState, item, index)
+            val desiredStem = desiredName.substringBeforeLast(".")
+            var outputFile = File(outputDir, desiredName)
             var counter = 1
             while (outputFile.exists()) {
-                outputFile = File(outputDir, "${baseName}_Compressed ($counter).mp4")
+                outputFile = File(outputDir, "$desiredStem ($counter).mp4")
                 counter++
             }
             val outputPath = outputFile.absolutePath
@@ -1679,9 +1774,11 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
             val itemOutputHeight = plan.outputHeight
             val itemOutputFps = plan.outputFps
 
-            val seconds = item.durationMs / 1000.0
+            val effectiveDurationMs = if (item.trimmedDurationMs > 0L) item.trimmedDurationMs else item.durationMs
+            val seconds = effectiveDurationMs / 1000.0
             val targetSizePct = item.targetSizePercentageOverride ?: currentState.globalTargetSizePercentage
-            val itemOriginalMb = item.originalSize / (1024.0 * 1024.0)
+            val trimRatio = if (item.durationMs > 0L) item.trimmedDurationMs.toDouble() / item.durationMs else 1.0
+            val itemOriginalMb = item.originalSize / (1024.0 * 1024.0) * trimRatio
             val targetMbForCalculation = if (currentState.isBatchMode) {
                 (itemOriginalMb * (targetSizePct / 100.0)).coerceAtLeast(0.1)
             } else {
@@ -1742,6 +1839,8 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                     audioCodec = currentState.audioCodec,
                     removeAudio = item.removeAudioOverride ?: currentState.removeAudio,
                     audioVolume = item.audioVolumeOverride ?: currentState.audioVolume,
+                    trimStartMs = item.trimStartMs,
+                    trimEndMs = item.trimEndMs,
                     onHdrToneMap = {
                         val warningMsg = getApplication<android.app.Application>().getString(R.string.warning_hdr_tone_mapped)
                         BackgroundCompressionManager.setHdrWarning(warningMsg)

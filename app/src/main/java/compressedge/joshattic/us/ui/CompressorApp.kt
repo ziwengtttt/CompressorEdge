@@ -66,6 +66,9 @@ import compressedge.joshattic.us.ui.screens.settings.AboutScreen
 import compressedge.joshattic.us.ui.screens.settings.DisplaySettingsScreen
 import compressedge.joshattic.us.ui.screens.settings.SettingsScreen
 import compressedge.joshattic.us.utils.ExpressiveSpatialSpring
+import compressedge.joshattic.us.ui.components.FileBrowserDialog
+import compressedge.joshattic.us.utils.hasAllFilesAccess
+import compressedge.joshattic.us.utils.openAllFilesAccessSettings
 import compressedge.joshattic.us.viewmodel.CompressorViewModel
 import java.io.File
 import kotlinx.coroutines.CancellationException
@@ -147,8 +150,24 @@ fun CompressorApp(viewModel: CompressorViewModel) {
         }
     }
     
-    val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
+    // In-app file browser (all-files access) so a whole folder can be selected at once.
+    var showFileBrowser by remember { mutableStateOf(false) }
+    var showPermissionDialog by remember { mutableStateOf(false) }
+
+    // System file picker (SAF): reliable display names, works for hidden folders, no media
+    // permission needed. The Photo Picker deliberately returns numeric ids on some devices,
+    // which is why the output used to be named "5108.mp4" / "Compressed.mp4".
+    val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) {
+            // Keep read access alive for background compression and long batches.
+            uris.forEach { uri ->
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        uri,
+                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+            }
             viewModel.updateSelectedUris(context, uris)
         }
     }
@@ -409,7 +428,13 @@ fun CompressorApp(viewModel: CompressorViewModel) {
                                     0 -> EmptyScreen(
                                         totalSaved = state.formattedTotalSaved,
                                         showStorageSaved = state.showStorageSaved,
-                                        onPick = { pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }
+                                        onPick = {
+                                            if (hasAllFilesAccess()) {
+                                                showFileBrowser = true
+                                            } else {
+                                                showPermissionDialog = true
+                                            }
+                                        }
                                     )
                                     2 -> {
                                         if (state.error != null) {
@@ -496,6 +521,44 @@ fun CompressorApp(viewModel: CompressorViewModel) {
                 }) {
                     Text(stringResource(R.string.bg_compression_not_now))
                 }
+            }
+        )
+    }
+
+    if (showFileBrowser) {
+        FileBrowserDialog(
+            onDismiss = { showFileBrowser = false },
+            onConfirm = { uris ->
+                showFileBrowser = false
+                if (uris.isNotEmpty()) {
+                    viewModel.updateSelectedUris(context, uris)
+                }
+            }
+        )
+    }
+
+    if (showPermissionDialog) {
+        AlertDialog(
+            onDismissRequest = { showPermissionDialog = false },
+            title = { Text("需要文件访问权限") },
+            text = {
+                Text(
+                    "授予「所有文件访问权限」后，可以进入任意文件夹（包括隐藏目录），" +
+                        "并一次全选整个文件夹的视频。\n\n" +
+                        "也可以改用系统选择器逐个挑选。"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPermissionDialog = false
+                    openAllFilesAccessSettings(context)
+                }) { Text("去授权") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showPermissionDialog = false
+                    pickMedia.launch(arrayOf("video/*"))
+                }) { Text("用系统选择器") }
             }
         )
     }

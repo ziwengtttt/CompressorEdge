@@ -59,6 +59,9 @@ object CompressionExecutor {
         val audioCodec: String,
         val removeAudio: Boolean,
         val audioVolume: Float,
+        // Trim range in milliseconds. trimEndMs == 0 means "until the end" (see C.TIME_END_OF_SOURCE).
+        val trimStartMs: Long = 0L,
+        val trimEndMs: Long = 0L,
         val onHdrToneMap: (() -> Unit)? = null
     )
 
@@ -193,7 +196,14 @@ object CompressionExecutor {
             effectsList.add(FrameDropEffect.createSimpleFrameDropEffect(params.originalFps, params.outputFps.toFloat()))
         }
 
-        val mediaItem = MediaItem.fromUri(params.inputUri)
+        val clippingConfiguration = MediaItem.ClippingConfiguration.Builder()
+            .setStartPositionMs(params.trimStartMs.coerceAtLeast(0L))
+            .apply { if (params.trimEndMs > 0L) setEndPositionMs(params.trimEndMs) }
+            .build()
+        val mediaItem = MediaItem.Builder()
+            .setUri(params.inputUri)
+            .setClippingConfiguration(clippingConfiguration)
+            .build()
         val audioProcessors: List<AudioProcessor> = if (!params.removeAudio) {
             val volumeProcessor = VolumeAudioProcessor().apply { setVolume(params.audioVolume) }
             listOf(volumeProcessor, SonicAudioProcessor())

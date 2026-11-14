@@ -26,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
@@ -36,13 +37,16 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -57,7 +61,9 @@ import compressedge.joshattic.us.R
 import compressedge.joshattic.us.model.CompressorUiState
 import compressedge.joshattic.us.model.QueueItem
 import compressedge.joshattic.us.ui.components.SelectionChip
+import compressedge.joshattic.us.ui.components.TrimDialog
 import compressedge.joshattic.us.utils.expressiveScale
+import compressedge.joshattic.us.utils.formatDuration
 import compressedge.joshattic.us.utils.formatFileSize
 import compressedge.joshattic.us.viewmodel.CompressorViewModel
 
@@ -68,6 +74,7 @@ fun QueueTab(state: CompressorUiState, viewModel: CompressorViewModel) {
         contentPadding = PaddingValues(top = 16.dp, bottom = 120.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        item { UnifiedCompressionCard(state, viewModel) }
         items(
             items = state.queue,
             key = { it.uri.toString() }
@@ -80,12 +87,133 @@ fun QueueTab(state: CompressorUiState, viewModel: CompressorViewModel) {
 }
 
 @Composable
+private fun UnifiedCompressionCard(state: CompressorUiState, viewModel: CompressorViewModel) {
+    val haptics = LocalHapticFeedback.current
+    var pct by remember { mutableFloatStateOf(state.globalTargetSizePercentage) }
+    LaunchedEffect(state.globalTargetSizePercentage) {
+        pct = state.globalTargetSizePercentage
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "批量统一设置",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = "这里改的是整批视频。个别视频要不同参数，展开它点「单独调整」。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Text("分辨率", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SelectionChip(
+                    selected = state.targetResolutionHeight == 0,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.setResolution(0)
+                    },
+                    label = "原视频"
+                )
+                listOf(1080, 720, 540, 480, 360).forEach { height ->
+                    SelectionChip(
+                        selected = state.targetResolutionHeight == height,
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.setResolution(height)
+                        },
+                        label = "${height}p"
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "目标体积",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "${pct.toInt()}%",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            Slider(
+                value = pct,
+                onValueChange = {
+                    pct = it
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                },
+                onValueChangeFinished = { viewModel.setGlobalTargetSizePercentage(pct) },
+                valueRange = 10f..100f,
+                steps = 17
+            )
+
+            Text("帧率", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SelectionChip(
+                    selected = state.targetFps == 0,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.setFps(0)
+                    },
+                    label = "原视频"
+                )
+                listOf(60, 30).forEach { fps ->
+                    SelectionChip(
+                        selected = state.targetFps == fps,
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.setFps(fps)
+                        },
+                        label = "$fps FPS"
+                    )
+                }
+            }
+
+            TextButton(
+                onClick = { viewModel.clearAllOverrides() },
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                Text("全部恢复跟随统一设置", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+}
+
+@Composable
 private fun QueueItemCard(
     item: QueueItem,
     state: CompressorUiState,
     viewModel: CompressorViewModel
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var showTrimDialog by remember { mutableStateOf(false) }
+    var showOverrides by remember { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
     val interactionSource = remember { MutableInteractionSource() }
 
@@ -95,6 +223,18 @@ private fun QueueItemCard(
             item.audioBitrateOverride != null ||
             item.removeAudioOverride != null ||
             item.audioVolumeOverride != null
+
+    if (showTrimDialog) {
+        TrimDialog(
+            item = item,
+            onDismiss = { showTrimDialog = false },
+            onApply = { startMs, endMs, lossless ->
+                viewModel.updateQueueItemTrim(item.uri, startMs, endMs)
+                viewModel.updateQueueItemLossless(item.uri, lossless)
+                showTrimDialog = false
+            }
+        )
+    }
 
     Card(
         modifier = Modifier
@@ -186,6 +326,71 @@ private fun QueueItemCard(
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
+                        // Trim range for this clip
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "裁剪区间",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                if (item.hasTrim) {
+                                    TextButton(
+                                        onClick = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            viewModel.resetQueueItemTrim(item.uri)
+                                        }
+                                    ) {
+                                        Text("重置裁剪", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                            }
+                            Text(
+                                text = (if (item.hasTrim) {
+                                    "${formatDuration(item.trimStartMs)} → " +
+                                        "${formatDuration(if (item.trimEndMs > 0L) item.trimEndMs else item.durationMs)}" +
+                                        " · 保留 ${formatDuration(item.trimmedDurationMs)}"
+                                } else {
+                                    "完整视频 · ${formatDuration(item.durationMs)}"
+                                }) + if (item.losslessTrim) " · 仅裁剪（无损）" else "",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OutlinedButton(onClick = { showTrimDialog = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentCut,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(if (item.hasTrim) "修改裁剪" else "裁剪视频")
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (hasAnyOverrides) "已单独调整" else "压缩设置：跟随统一设置",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (hasAnyOverrides) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            TextButton(onClick = { showOverrides = !showOverrides }) {
+                                Text(if (showOverrides) "收起" else "单独调整")
+                            }
+                        }
+
+                        AnimatedVisibility(visible = showOverrides) {
+                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -512,6 +717,8 @@ private fun QueueItemCard(
                                         Text("Reset Volume", style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
+                            }
+                        }
                             }
                         }
                     }

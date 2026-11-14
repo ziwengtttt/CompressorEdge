@@ -67,11 +67,13 @@ fun ConfigScreen(
     context: Context,
     onStartCompression: () -> Unit = { viewModel.startCompression(context) }
 ) {
-    val tabs = if (state.isBatchMode) {
-        listOf("Queue", stringResource(R.string.tab_presets), stringResource(R.string.tab_video), stringResource(R.string.tab_audio))
-    } else {
-        listOf(stringResource(R.string.tab_presets), stringResource(R.string.tab_video), stringResource(R.string.tab_audio))
-    }
+    // Always expose the queue tab so a single selected video can be trimmed too.
+    val tabs = listOf(
+        "Queue",
+        stringResource(R.string.tab_presets),
+        stringResource(R.string.tab_video),
+        stringResource(R.string.tab_audio)
+    )
     val pagerState = rememberPagerState(pageCount = { tabs.size })
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()

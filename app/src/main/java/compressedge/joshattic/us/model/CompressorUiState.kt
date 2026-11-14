@@ -185,7 +185,7 @@ data class CompressorUiState(
                 // Approximate minimum size for the whole batch
                 var totalMin = 0f
                 for (item in queue) {
-                    val seconds = item.durationMs / 1000f
+                    val seconds = (if (item.trimmedDurationMs > 0L) item.trimmedDurationMs else item.durationMs) / 1000f
                     if (seconds <= 0) continue
                     val audioBits = if (item.removeAudioOverride ?: removeAudio) 0f else {
                         val rate = if (audioBitrate == 0) 256_000f else audioBitrate.toFloat() // Using global for simplicity here
@@ -226,7 +226,7 @@ data class CompressorUiState(
                     val target = (itemOriginal * (pct / 100f)).coerceAtLeast(0.1f)
                     
                     // We need item's minimumSizeMb, approximated
-                    val seconds = item.durationMs / 1000f
+                    val seconds = (if (item.trimmedDurationMs > 0L) item.trimmedDurationMs else item.durationMs) / 1000f
                     val audioBits = if (item.removeAudioOverride ?: removeAudio) 0f else {
                         val rate = if (audioBitrate == 0) 256_000f else audioBitrate.toFloat()
                         rate * seconds
